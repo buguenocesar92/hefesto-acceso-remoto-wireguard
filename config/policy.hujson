@@ -1,0 +1,75 @@
+// Politica de segmentacion de la red privada del cliente.
+//
+// Formato: huJSON, el mismo que usa Tailscale (admite comentarios).
+// Sintaxis y semantica verificadas en:
+//   https://github.com/juanfont/headscale/blob/v0.29.5/docs/ref/policy.md
+//
+// QUE HACE ESTE ARCHIVO Y POR QUE IMPORTA:
+// Por defecto, si NO existe politica, headscale permite TODO el trafico entre nodos
+// de la red. Eso esta bien para una prueba de escritorio y esta mal para servidores
+// de un cliente. La presencia de la seccion "grants" convierte esto en una politica
+// de acceso denegado por omision: lo que no esta escrito, no pasa.
+//
+// upstream recomienda usar "grants" y considera "acls" como legado, asi que este
+// kit usa solo "grants".
+//
+// ESTE ARCHIVO ES UN PUNTO DE PARTIDA, NO UN PRODUCTO FINAL.
+// Hay que ajustarlo a la realidad del cliente antes de cobrarlo por hecho.
+
+{
+  // Segmentacion:
+  //
+  // 1) Cada empleado llega a sus propios equipos. autogroup:member son los nodos
+  //    personales, es decir los que tienen dueño humano.
+  {
+    "src": ["autogroup:member"],
+    "dst": ["autogroup:self"],
+    "ip": ["*"]
+  },
+
+  // 2) Los empleados llegan a los servidores del cliente SOLO por SSH.
+  //    "tag:server" es una etiqueta que se le asigna a los nodos que hacen de
+  //    servidor. Notar que NO se permite llegar a los puertos 80 ni 443 de los
+  //    servidores por la red privada: si el cliente necesita publicar sitios web,
+  //    eso se hace por el proxy y por el DNS publico, no abriendo la red privada.
+  {
+    "src": ["autogroup:member"],
+    "dst": ["tag:server"],
+    "ip": ["22"]
+  },
+
+  // ------------------------------------------------------------------
+  // NOTAS IMPORTANTES ANTES DE TOCAR ESTO
+  // ------------------------------------------------------------------
+
+  // a) COMO SE ASIGNA LA ETIQUETA "tag:server"
+  //    Crear un nodo con etiqueta exige que alguien tenga permiso para ello. Eso se
+  //    declara en la seccion "tagOwners". Upstream documenta que el permiso se ve
+  //    asi (copiado textual de docs/ref/registration.md v0.29.5):
+  //
+  //      "tagOwners": {
+  //        "tag:server": ["usuario-de-hrefi-studio"]
+  //      }
+  //
+  //    Se deja commented a proposito porque el nombre de usuario debe coincidir
+  //    exactamente con lo que devuelve "headscale users list", y porque upstream
+  //    advierte en su documentacion de OIDC que el usuario no debe terminar en "@".
+  //    Verificar antes de descommentar.
+
+  // b) RENDIMIENTO
+  //    upstream advierte que usar autogroup:self puede degradar el rendimiento del
+  //    servidor de coordinacion, porque las reglas se compilan por nodo y no de
+  //    forma global. Con redes de cliente esto no deberia notarse, pero si la red
+  //    crece mucho, reemplazar la regla 1 por reglas explicitas usuario por usuario.
+
+  // c) TAILSCALE SSH
+  //    Este kit NO habilita Tailscale SSH. Es una alternativa interesante a dejar
+  //    sshd escuchando, pero habilitarla cambia por completo el modelo de acceso y
+  //    hay que probarla antes de ofrecerla. Ver docs/08-SERVICIOS-COMERCIALES.md.
+
+  // d) CGNAT
+  //    randomizeClientPort hace que cada nodo eliga un puerto UDP aleatorio para
+  //    WireGuard en vez del puerto fijo 41641. Ayuda cuando hay NAT de operador o
+  //    conflictos de CGNAT. Esta clave si la soporta headscale v0.29.5.
+  "randomizeClientPort": true
+}

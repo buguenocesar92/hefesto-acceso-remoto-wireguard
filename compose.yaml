@@ -1,0 +1,68 @@
+# Hefesto Studio - kit de acceso remoto seguro sobre WireGuard (Headscale)
+#
+# Arquitectura: un unico contenedor (Headscale, servidor de coordinacion) + SQLite.
+# El trafico entre nodos es punto a punto y va cifrado con WireGuard.
+# Headscale NO transporta el trafico de los usuarios: solo reparte claves, direcciones
+# y la configuracion de la red privada.
+#
+# Fuente de este compose: la seccion "Running headscale in a container" de la
+# documentacion oficial, tag v0.29.5:
+#   https://github.com/juanfont/headscale/blob/v0.29.5/docs/setup/install/container.md
+# Todos los ajustes que se apartan del upstream estan comentados en el lugar exacto.
+
+services:
+  headscale:
+    # Version fijada por etiqueta Y por digest. El digest es el indice multiarquitectura
+    # publicado por upstream, asi que el mismo valor sirve en amd64 y arm64.
+    # Fuente del digest: Docker Hub API, etiqueta 0.29.5.
+    #   https://hub.docker.com/r/headscale/headscale/tags/0.29.5
+    #   index : sha256:780ed2f9e85719a2211277433f2c8afb45105d0d25031949a6848a485f9e216d
+    #   amd64 : sha256:0c6299f9333c072922a22c58dcec23af88be8bea4150be4475cdf0ad4f87a682
+    #   arm64 : sha256:8ba61f76dc7ac48daf302a06cbb17788e2db06164c14266cc89782cdc5bf7287
+    image: docker.io/headscale/headscale:0.29.5@sha256:780ed2f9e85719a2211277433f2c8afb45105d0d25031949a6848a485f9e216d
+    container_name: headscale
+    restart: unless-stopped
+
+    # Sistema de archivos de solo lectura, igual que upstream. Lo unico que se escribe
+    # en tiempo de ejecucion va en el volumen de datos y en el tmpfs del socket.
+    read_only: true
+    tmpfs:
+      - /var/run/headscale
+
+    # Solo escucha en el loopback del host. NO se publica 8080 ni 9090 al exterior.
+    # El acesso de los clientes se hace por HTTPS (443) a traves del proxy inverso,
+    # que es el unico puerto que hay que abrir en el firewall.
+    # Verificado en config-example.yaml v0.29.5: listen_addr y metrics_listen_addr.
+    ports:
+      - "${HEADSCALE_BIND_ADDR:-127.0.0.1}:${HEADSCALE_LISTEN_PORT:-8080}:8080"
+      - "${HEADSCALE_BIND_ADDR:-127.0.0.1}:${HEADSCALE_METRICS_PORT:-9090}:9090"
+
+    volumes:
+      # Configuracion de solo lectura. El contenedor nunca escribe en esta ruta.
+      - ./config:/etc/headscale:ro
+      # Datos persistentes: base SQLite, clave privada de Noise, clave del DERP
+      # embebido si se activara, y cache de certificados si se usara ACME interno.
+      # Rutas confirmadas en config-example.yaml v0.29.5.
+      - ./data:/var/lib/headscale
+
+    command: serve
+
+    # Healthcheck tomado literalmente del compose oficial de upstream v0.29.5.
+    # No es un healthcheck generico: usa el subcomando propio del binario.
+    healthcheck:
+      test: ["CMD", "headscale", "health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+    # El contenedor no necesita privileged ni capabilities adicionales:
+    # no abre puertos UDP, no crea interfaces de red y no monta socket del sistema.
+    security_opt:
+      - no-new-privileges:true
+
+# Nota sobre puertos UDP:
+# El servidor de coordinacion NO necesita ningun puerto UDP con la configuracion de
+# este kit. El puerto UDP se usa solo si se activa el servidor DERP embebido
+# (derp.server.enabled), que esta en false por defecto y que este kit deja apagado.
+# Ver "Ports in use" en docs/setup/requirements.md de headscale v0.29.5.

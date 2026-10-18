@@ -1,0 +1,35 @@
+# Secretos y datos de ejecucion. NUNCA deben entrar al control de versiones.
+
+.env
+.env.*
+!.env.example
+
+# Estado persistente del servidor de coordinacion.
+# Contiene la base SQLite con usuarios, nodos y claves, y la clave privada de
+# Noise que identifica criptograficamente a este servidor.
+data/
+config/derp_server_private.key
+config/noise_private.key
+config/*.pem
+config/*.key
+
+# Certificados y material de TLS generado en caliente.
+*.crt
+*.key
+*.csr
+
+# Respaldos producidos por scripts/backup-headscale.sh
+backups/
+*.tar.gz
+MANIFESTO.sha256
+
+# Nada de esto deberia existir aqui, pero por si alguien deja un volcado.
+/var/lib/headscale
+
+# Sistema operativo y editores
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.idea/
+.vscode/

@@ -1,0 +1,137 @@
+# Configuracion de Headscale v0.29.5 para una red privada de un solo cliente.
+#
+# Origen de TODAS las claves de este archivo: config-example.yaml del tag v0.29.5
+#   https://github.com/juanfont/headscale/blob/v0.29.5/config-example.yaml
+# Los comentarios explican el por que de cada decision; los valores marcados con
+# <CAMBIA-ESTO> son los unicos que Hefesto debe ajustar por cliente.
+#
+# DECISION DE DISENO CLAVE: la base de datos es SQLite, no PostgreSQL.
+# En config-example.yaml v0.29.5 el propio upstream dice, textualmente, que usar
+# Postgres "is highly discouraged as it is only supported for legacy reasons" y que
+# todo el desarrollo y las optimizaciones se hacen pensando en SQLite.
+# Por eso este kit NO usa PostgreSQL y NO es compatible con Supabase.
+
+# URL que usan los clientes para conectarse. Debe ser HTTPS en produccion.
+server_url: https://<CAMBIA-ESTO-DOMINIO>
+
+# Dentro del contenedor hay que escuchar en todas las interfaces, porque en el host
+# el puerto ya queda acotado a loopback por el compose. Ver config-example.yaml v0.29.5.
+listen_addr: 0.0.0.0:8080
+
+# Metricas y depuracion. En el host queda published solo en 127.0.0.1:9090.
+# upstream marca explicitamente este puerto como "Expose publicly: no".
+metrics_listen_addr: 0.0.0.0:9090
+
+# Interfaz gRPC para controlar Headscale en remoto. Se deja en loopback dentro del
+# contenedor y NO se publica en el compose: la administracion normal se hace por el
+# socket Unix, no por gRPC. upstream marca el 50443 como "Expose publicly: yes",
+# asi que abrirlo seria sumar un puerto publico sin necesidad.
+grpc_listen_addr: 127.0.0.1:50443
+grpc_allow_insecure: false
+
+# Proxies inversos cuya IP real de cliente se debe respetar.
+# Se deja VACIO a proposito. upstream advierte que ponerlo sin un proxy delante
+# permite que un cliente falsifique sus cabeceras de origen. Hay que llenarlo con la
+# IP real del proxy DESPUES de instalar, y solo cuando exista.
+# Ver docs/01-INSTALACION-DOCKER.md, seccion "Proxy inverso".
+trusted_proxies: []
+
+# Clave privada del protocolo Noise. Es la identidad criptografica del servidor de
+# coordinacion. Si se pierde, todos los nodos deben volver a autenticarse.
+# Si el archivo no existe, headscale lo genera solo. ESTA RUTA ES PERSISTENTE.
+noise:
+  private_key_path: /var/lib/headscale/noise_private.key
+
+# Rangos de direcciones de la red privada.
+# ADVERTENCIA de upstream: deben ser subconjuntos de los rangos estandar de Tailscale.
+# Usar rangos fuera de CGNAT/ULA rompe el cliente de formas sutiles y difficult de
+# diagnosticar. Estos son los rangos estandar.
+prefixes:
+  v4: 100.64.0.0/10
+  v6: fd7a:115c:a1e0::/48
+  allocation: sequential
+
+derp:
+  server:
+    # DERP embebido APAGADO (es el valor por defecto de upstream).
+    # Encenderlo obliga a abrir udp/3478 y a exponer un relay mas.
+    # Este kit lo deja apagado a proposito para mantener la promesa de seguridad:
+    # un unico puerto publico (HTTPS/443).
+    enabled: false
+
+  # Mapa de DERP que se entrega a los clientes. Por defecto upstream entrega el de
+  # Tailscale. OJO HONESTO: si un par de nodos no logra conexion directa, el
+  # trafico pasa por un relay de Tailscale. El relay solo ve texto cifrado por
+  # WireGuard, pero si el dato es sensible conviene alojar un DERP propio.
+  # Ver docs/07-PRUEBAS-DE-ACEPTACION.md, seccion DERP.
+  urls:
+    - https://controlplane.tailscale.com/derpmap/default
+  auto_update_enabled: true
+  update_frequency: 3h
+
+database:
+  # SQLite. Ver la nota de diseno al inicio de este archivo.
+  type: sqlite
+  debug: false
+  gorm:
+    prepare_stmt: true
+    parameterized_queries: true
+    skip_err_record_not_found: true
+    slow_threshold: 1000
+  sqlite:
+    # RUTA PERSISTENTE. Este archivo ES la red: usuarios, nodos, claves y politicas.
+    path: /var/lib/headscale/db.sqlite
+    write_ahead_log: true
+    wal_autocheckpoint: 1000
+
+# Politica de segmentacion. Sin este archivo, headscale permite TODO el trafico
+# entre nodos. Ver config/policy.hujson y docs/08-SERVICIOS-COMERCIALES.md.
+policy:
+  mode: file
+  path: /etc/headscale/policy.hujson
+
+dns:
+  magic_dns: true
+  # Debe ser un nombre de dominio completo, sin punto final, y DISTINTO del dominio
+  # de server_url. Los hostnames quedan como <maquina>.<base_domain>.
+  base_domain: <CAMBIA-ESTO-BASE-DOMAIN>
+  override_local_dns: true
+  nameservers:
+    global:
+      - 1.1.1.1
+      - 1.0.0.1
+
+# Socket Unix para la CLI. Es la via normal de administracion: no requiere abrir
+# ningun puerto de administracion en el firewall.
+unix_socket: /var/run/headscale/headscale.sock
+unix_socket_permission: "0770"
+
+# Caducidad por defecto de los nodos personales. upstream aclara que Tailscale
+# comercial usa 180 dias. Con 0 los nodos nunca caducan, lo que NO recomendamos
+# para un servicio recurrente: una laptop robada seguiria entrando para siempre.
+# Los nodos con etiqueta (tag) nunca caducan.
+node:
+  expiry: 180d
+  ephemeral:
+    inactivity_timeout: 30m
+
+# Envio de logs de los clientes a la infraestructura de Tailscale. Se mantiene
+# apagado (valor por defecto de upstream) para que la informacion del cliente
+# no salga a un tercero.
+logtail:
+  enabled: false
+
+# Taildrop (compartir archivos entre nodos). upstream lo tiene en true.
+# Este kit lo apaga: no es necesario para administer servidores y reduce la
+# superficie por la que puede salir informacion del cliente.
+taildrop:
+  enabled: false
+
+# Actualizaciones automaticas del cliente Tailscale. Apagado: las actualizaciones
+# del cliente se governs Hefesto por version fijada, no el usuario final.
+auto_update:
+  enabled: false
+
+log:
+  level: info
+  format: text
